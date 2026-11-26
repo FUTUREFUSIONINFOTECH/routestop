@@ -1,0 +1,6 @@
+{
+  "name": "RouteStop — Highway Food Pre-Order & Live Tracking",
+  "description": "Real-time highway restaurant pre-ordering, live bus GPS ETA tracking, dynamic QR management, and multi-portal operations platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
