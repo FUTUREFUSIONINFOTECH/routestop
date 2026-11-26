@@ -1,9 +1,6 @@
 import express from 'express';
 import http from 'http';
-import path from 'path';
 import crypto from 'crypto';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import QRCode from 'qrcode';
 import { createServer as createViteServer } from 'vite';
@@ -24,9 +21,6 @@ import type {
   AuditLog,
   Settlement,
 } from './src/types/platform.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const IMG_HERO = '/src/assets/images/highway_plaza_hero_1795667339325.jpg';
 const IMG_DOSA = '/src/assets/images/masala_dosa_platter_1795667339414.jpg';
@@ -997,7 +991,62 @@ function addNotification(
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
+
+  // GitHub Pages frontend -> Render API.
+  // Set CORS_ORIGINS in Render to a comma-separated list of allowed origins.
+  // Example: https://futurefusioninfotech.github.io
+  const allowedOrigins = new Set(
+    (process.env.CORS_ORIGINS || 'https://futurefusioninfotech.github.io')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+  );
+
+  app.use((req, res, next) => {
+    const requestOrigin = req.headers.origin;
+
+    if (requestOrigin && allowedOrigins.has(requestOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+      res.setHeader('Vary', 'Origin');
+    }
+
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      req.headers['access-control-request-headers'] || 'Content-Type, Authorization'
+    );
+
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+
+    next();
+  });
+
+  app.use(express.json({ limit: '1mb' }));
+
+  // Render health check endpoint.
+  app.get('/health', (_req, res) => {
+    res.status(200).json({
+      ok: true,
+      service: 'routestop-api',
+      timestamp: nowIso(),
+    });
+  });
+
+  // Simple root response so the Render service URL is not a blank page.
+  app.get('/', (_req, res) => {
+    res.status(200).json({
+      ok: true,
+      service: 'RouteStop API',
+      health: '/health',
+      state: '/api/state',
+      websocket: '/ws',
+    });
+  });
 
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server, path: '/ws' });
@@ -1793,24 +1842,17 @@ async function startServer() {
     res.status(201).json({ ok: true, settlement });
   });
 
-  // Vite / Static Serving
+  // Local development only: Vite serves the frontend through this server.
+  // In production, GitHub Pages hosts the frontend and Render hosts this API.
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.resolve(__dirname, 'dist');
-    if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath));
-      app.get('*', (_req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
-    }
   }
 
-  const PORT = Number(process.env.PORT || 3000);
+  const PORT = Number(process.env.PORT || 10000);
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`RouteStop server running on http://0.0.0.0:${PORT}`);
   });
