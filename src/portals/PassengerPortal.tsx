@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import highwayHero from '../assets/images/highway_plaza_hero_1795667339325.jpg';
+import filterCoffeeImage from '../assets/images/filter_coffee_snacks_1795667340074.jpg';
+import biryaniImage from '../assets/images/hyderabadi_biryani_pot_1795667339711.jpg';
+import masalaDosaImage from '../assets/images/masala_dosa_platter_1795667339414.jpg';
+import thaliImage from '../assets/images/thali_meal_tray_1795667340245.jpg';
 import {
   AlertCircle,
   ArrowLeft,
@@ -21,6 +26,42 @@ import {
 } from 'lucide-react';
 import { RouteMapVisualizer } from '../components/RouteMapVisualizer';
 import type { Order, OrderType, PlatformState, Restaurant } from '../types/platform';
+
+
+// API state currently contains legacy paths such as /src/assets/images/name.jpg.
+// Resolve those paths to Vite-imported assets so they also work on GitHub Pages.
+const PLATFORM_IMAGE_MAP: Record<string, string> = {
+  'highway_plaza_hero_1795667339325.jpg': highwayHero,
+  'filter_coffee_snacks_1795667340074.jpg': filterCoffeeImage,
+  'hyderabadi_biryani_pot_1795667339711.jpg': biryaniImage,
+  'masala_dosa_platter_1795667339414.jpg': masalaDosaImage,
+  'thali_meal_tray_1795667340245.jpg': thaliImage,
+};
+
+function resolvePlatformImage(imagePath?: string | null): string {
+  if (!imagePath) return highwayHero;
+
+  // Keep externally hosted image URLs working.
+  if (/^(https?:|data:|blob:)/i.test(imagePath)) return imagePath;
+
+  // Vite bundles files imported from src/assets. API values may still contain
+  // old source paths (for example /src/assets/images/restaurant.jpg). If the
+  // filename is not one of the bundled files, use a valid bundled fallback
+  // instead of returning a URL that cannot exist in the production build.
+  const filename = decodeURIComponent(
+    imagePath.split(/[\\/]/).pop()?.split('?')[0] ?? '',
+  );
+  const bundledImage = PLATFORM_IMAGE_MAP[filename];
+  if (bundledImage) return bundledImage;
+
+  // Keep non-local URLs (including public-folder URLs) unchanged.
+  if (imagePath.startsWith('/assets/') || imagePath.startsWith('./') || imagePath.startsWith('../')) {
+    return imagePath;
+  }
+
+  // Safe fallback for missing legacy /src/assets/images/... paths.
+  return highwayHero;
+}
 
 interface PassengerPortalProps {
   state: PlatformState;
@@ -458,11 +499,11 @@ export function PassengerPortal({
 
               <div className="lg:col-span-5 relative min-h-[240px] bg-slate-100">
                 <img
-                  src="/src/assets/images/highway_plaza_hero_1795667339325.jpg"
-                  alt="Highway food plaza and coach bay"
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
+  src={highwayHero}
+  alt="Highway food plaza and coach bay"
+  className="w-full h-full object-cover"
+  loading="eager"
+/>
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-950/15 to-transparent flex items-end p-5">
                   <div className="text-white text-xs">
                     <div className="font-semibold">Zero App Install Required</div>
@@ -525,7 +566,7 @@ export function PassengerPortal({
                         <div>
                           <div className="aspect-[16/10] bg-slate-100 relative overflow-hidden">
                             <img
-                              src={rest.heroImage}
+                              src={resolvePlatformImage(rest.heroImage)}
                               alt={rest.name}
                               className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
                               referrerPolicy="no-referrer"
@@ -621,7 +662,7 @@ export function PassengerPortal({
                         className="border border-slate-200 rounded-xl p-3.5 flex items-center gap-3.5 hover:border-emerald-300 transition-colors"
                       >
                         <img
-                          src={item.image}
+                          src={resolvePlatformImage(item.image)}
                           alt={item.name}
                           className="w-16 h-16 rounded-lg object-cover bg-slate-100 shrink-0"
                           referrerPolicy="no-referrer"
@@ -826,7 +867,7 @@ export function PassengerPortal({
 
                     <div className="w-28 h-28 rounded-lg overflow-hidden bg-slate-100 shrink-0">
                       <img
-                        src={item.image}
+                        src={resolvePlatformImage(item.image)}
                         alt={item.name}
                         className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-300"
                         referrerPolicy="no-referrer"

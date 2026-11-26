@@ -2,15 +2,56 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlatformState } from '../types/platform';
 
-// Render backend configuration
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
   'https://routestop-9rmb.onrender.com'
 ).replace(/\/+$/, '');
 
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
   'wss://routestop-9rmb.onrender.com/ws';
+
+
+function getApiUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+
+  return `${API_BASE_URL}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
+function getWebSocketUrl(): string {
+  return (
+    import.meta.env.VITE_WS_URL ||
+    'wss://routestop-9rmb.onrender.com/ws'
+  );
+}
+
+async function parseResponse<T>(res: Response): Promise<T> {
+  const text = await res.text();
+
+  let data: any;
+
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(
+      `Server returned invalid JSON (HTTP ${res.status}). ` +
+      `Check API endpoint: ${res.url}. Response: ${text.slice(0, 150)}`
+    );
+  }
+
+  if (!res.ok) {
+    throw new Error(
+      data?.error ||
+      data?.message ||
+      `Request failed with HTTP ${res.status}`
+    );
+  }
+
+  return data as T;
+}
 
 export function usePlatformSocket() {
   const [state, setState] = useState<PlatformState | null>(null);
@@ -21,16 +62,16 @@ export function usePlatformSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
 
-  // Fetch backend state
   const fetchSnapshot = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/state`);
+      const res = await fetch(getApiUrl('/api/state'), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const data = (await res.json()) as PlatformState;
+      const data = await parseResponse<PlatformState>(res);
 
       setState(data);
       setError(null);
@@ -38,46 +79,46 @@ export function usePlatformSocket() {
       setError(
         err instanceof Error
           ? err.message
-          : 'Unable to reach backend server'
+          : 'Unable to connect to backend'
       );
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // WebSocket connection
   useEffect(() => {
     let unmounted = false;
-    let reconnectDelay = 2500;
+
+    fetchSnapshot();
 
     const connect = () => {
       if (unmounted) return;
 
       try {
-        const ws = new WebSocket(WS_URL);
+        const ws = new WebSocket(getWebSocketUrl());
+
         wsRef.current = ws;
 
         ws.onopen = () => {
-          if (unmounted) return;
-
-          setConnected(true);
-          setError(null);
-          reconnectDelay = 2500;
+          if (!unmounted) {
+            setConnected(true);
+          }
         };
 
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data) as {
-              type?: string;
+              type: string;
               data?: PlatformState;
             };
 
             if (msg.data) {
               setState(msg.data);
               setLoading(false);
+              setError(null);
             }
           } catch {
-            console.warn('Invalid WebSocket message');
+            console.warn('Invalid WebSocket message:', event.data);
           }
         };
 
@@ -86,29 +127,25 @@ export function usePlatformSocket() {
 
           setConnected(false);
 
-          reconnectTimerRef.current = window.setTimeout(() => {
-            connect();
-          }, reconnectDelay);
-
-          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+          reconnectTimerRef.current = window.setTimeout(
+            connect,
+            5000
+          );
         };
 
         ws.onerror = () => {
           ws.close();
         };
       } catch (err) {
-        setConnected(false);
+        console.error('WebSocket connection error:', err);
 
-        if (!unmounted) {
-          reconnectTimerRef.current = window.setTimeout(
-            connect,
-            reconnectDelay
-          );
-        }
+        reconnectTimerRef.current = window.setTimeout(
+          connect,
+          5000
+        );
       }
     };
 
-    fetchSnapshot();
     connect();
 
     return () => {
@@ -123,36 +160,39 @@ export function usePlatformSocket() {
     };
   }, [fetchSnapshot]);
 
-  // API POST / PATCH requests
   const apiRequest = useCallback(
     async <T = unknown>(
       url: string,
       method: 'POST' | 'PATCH',
       body?: unknown
     ): Promise<T> => {
-      const endpoint = url.startsWith('http')
-        ? url
-        : `${API_BASE_URL}/${url.replace(/^\/+/, '')}`;
-
-      const res = await fetch(endpoint, {
+      const res = await fetch(getApiUrl(url), {
         method,
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/json',
         },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
+        body:
+          body !== undefined
+            ? JSON.stringify(body)
+            : undefined,
       });
 
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(
-          json.error || `Request failed (${res.status})`
-        );
-      }
-
-      return json as T;
+      return parseResponse<T>(res);
     },
     []
+  );
+
+  const post = useCallback(
+    <T = unknown>(url: string, body?: unknown) =>
+      apiRequest<T>(url, 'POST', body),
+    [apiRequest]
+  );
+
+  const patch = useCallback(
+    <T = unknown>(url: string, body?: unknown) =>
+      apiRequest<T>(url, 'PATCH', body),
+    [apiRequest]
   );
 
   return {
@@ -161,11 +201,7 @@ export function usePlatformSocket() {
     connected,
     error,
     refresh: fetchSnapshot,
-
-    post: <T = unknown>(url: string, body?: unknown) =>
-      apiRequest<T>(url, 'POST', body),
-
-    patch: <T = unknown>(url: string, body?: unknown) =>
-      apiRequest<T>(url, 'PATCH', body),
+    post,
+    patch,
   };
 }
